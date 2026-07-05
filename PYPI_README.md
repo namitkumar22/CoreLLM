@@ -53,22 +53,16 @@ chain = ChatPromptTemplate.from_messages([
 print(chain.invoke({"question": "What is Python?"}).content)
 ```
 
-## 🌐 Standard OpenAI SDK Integration
+## 🌐 Standard OpenAI & Groq Compatibility
 
-Since CoreLLM is fully OpenAI-compatible, you can also use the standard LangChain OpenAI classes directly by simply pointing the `base_url` to your Hugging Face Space.
+You can use the standard `ChatOpenAI` or `ChatGroq` classes without cluttering your code with URLs or API keys by simply setting the environment variables at the top of your script!
 
 ```python
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
+from langchain_groq import ChatGroq
 
-llm = ChatOpenAI(
-    model="gemma4:e4b",
-    base_url="https://namitkumar22-corellm.hf.space/v1",
-    api_key="your-api-key"
-)
-
-response = llm.invoke([HumanMessage(content="Hello!")])
-print(response.content)
+llm_openai = ChatOpenAI(model="gemma4:e4b")
+llm_groq = ChatGroq(model="gemma4:e4b")
 ```
 
 ## 🛠 Raw APIs (`raw_chat` & `generate`)
