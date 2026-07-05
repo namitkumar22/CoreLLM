@@ -12,7 +12,7 @@ Usage
         model="gemma4:e4b"
     )
     
-    # LangChain usage
+    # LangChain usage (Now supports EVERYTHING ChatOpenAI supports: agents, bind_tools, RAG, etc)
     response = llm.invoke([HumanMessage(content="Hello!")])
     print(response.content)
     
@@ -28,21 +28,17 @@ import httpx
 from typing import Optional, Any, List, Mapping, Dict
 
 # pyrefly: ignore [missing-import]
-from langchain_core.language_models.chat_models import BaseChatModel
-# pyrefly: ignore [missing-import]
-from langchain_core.messages import BaseMessage, AIMessage
-# pyrefly: ignore [missing-import]
-from langchain_core.outputs import ChatGeneration, ChatResult
-# pyrefly: ignore [missing-import]
-from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_openai import ChatOpenAI
+from pydantic import Field
 
 
-class CoreLLMChat(BaseChatModel):
+class CoreLLMChat(ChatOpenAI):
     """
     LangChain-compatible chat model backed by your CoreLLM HF Space.
 
-    Drop-in replacement for ChatOpenAI — use it in any LangChain
-    chain or LangGraph graph. Also includes raw OpenAI compatibility methods.
+    Subclasses ChatOpenAI — drop-in replacement that natively supports
+    EVERYTHING in LangChain and LangGraph (agents, bind_tools, streaming).
+    Also includes raw OpenAI compatibility methods.
     
     Parameters
     ----------
@@ -56,43 +52,83 @@ class CoreLLMChat(BaseChatModel):
         Request timeout seconds (default 300).
     """
 
-    model: str
-    base_url: str = "https://namitkumar22-corellm.hf.space"
-    preload: bool = True
-    timeout: int = 300
+    corellm_base_url: str = Field(default="https://namitkumar22-corellm.hf.space")
+    preload_model: bool = Field(default=True)
+    corellm_timeout: int = Field(default=300)
 
-    def model_post_init(self, __context: Any) -> None:
-        """Called automatically after __init__ by pydantic v2."""
-        # Need to re-assign properly if missing
-        base = self.base_url or os.environ.get("CORELLM_BASE_URL", "https://namitkumar22-corellm.hf.space")
-        self.base_url = base.rstrip("/")
+    def __init__(self, **kwargs: Any):
+        # Support the old `base_url` argument but map to our custom variable
+        if "base_url" in kwargs and "corellm_base_url" not in kwargs:
+            kwargs["corellm_base_url"] = kwargs.pop("base_url")
 
-        if self.preload:
-            self._preload(self.model)
+        # Resolve the base URL (defaults to ENV var if present, then HF Space)
+        env_base = os.environ.get("CORELLM_BASE_URL", "https://namitkumar22-corellm.hf.space")
+        base = kwargs.get("corellm_base_url", env_base).rstrip("/")
+        
+        # Set our variables
+        kwargs["corellm_base_url"] = base
+        
+        # ChatOpenAI needs base_url to point to the OpenAI-compatible endpoint
+        kwargs["base_url"] = f"{base}/v1"
+
+        # ChatOpenAI requires an API key, we supply a dummy one if none exists
+        if "api_key" not in kwargs and "openai_api_key" not in kwargs:
+            kwargs["api_key"] = "not-needed"
+            
+        # Extract custom fields to prevent Pydantic strict-validation issues
+        corellm_base_url = kwargs.pop("corellm_base_url")
+        preload_model = kwargs.pop("preload", True)
+        preload_model = kwargs.pop("preload_model", preload_model)
+        corellm_timeout = kwargs.pop("timeout", 300)
+        corellm_timeout = kwargs.pop("corellm_timeout", corellm_timeout)
+
+        super().__init__(**kwargs)
+        
+        # Manually set the custom fields after init
+        self.corellm_base_url = corellm_base_url
+        self.preload_model = preload_model
+        self.corellm_timeout = corellm_timeout
+
+        if self.preload_model:
+            self._preload(self.model_name)
 
     @property
     def _llm_type(self) -> str:
         return "corellm_sdk"
 
-    @property
-    def _identifying_params(self) -> Mapping[str, Any]:
-        return {"model": self.model, "base_url": self.base_url}
-
     # ── Internals ─────────────────────────────────────────────────────────────
 
     @property
     def _headers(self) -> dict:
-        return {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
+        
+        token = os.environ.get("HF_TOKEN")
+        if not token:
+            try:
+                from huggingface_hub import get_token
+                token = get_token()
+            except ImportError:
+                pass
+                
+        if not token and hasattr(self, "api_key") and self.api_key:
+            api_key_str = self.api_key.get_secret_value() if hasattr(self.api_key, "get_secret_value") else str(self.api_key)
+            if api_key_str != "not-needed":
+                token = api_key_str
+                
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
+        return headers
 
     def _post(self, path: str, body: dict) -> dict:
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(f"{self.base_url}{path}", json=body, headers=self._headers)
+        with httpx.Client(timeout=self.corellm_timeout) as client:
+            r = client.post(f"{self.corellm_base_url}{path}", json=body, headers=self._headers)
             r.raise_for_status()
             return r.json()
 
     def _get(self, path: str) -> dict:
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.get(f"{self.base_url}{path}", headers=self._headers)
+        with httpx.Client(timeout=self.corellm_timeout) as client:
+            r = client.get(f"{self.corellm_base_url}{path}", headers=self._headers)
             r.raise_for_status()
             return r.json()
 
@@ -111,16 +147,16 @@ class CoreLLMChat(BaseChatModel):
         Switch the active model on the server and update this instance.
         Previous model is unloaded from RAM automatically.
         """
-        print(f"[CoreLLM SDK] Switching '{self.model}' → '{new_model}'...")
+        print(f"[CoreLLM SDK] Switching '{self.model_name}' → '{new_model}'...")
         self._post("/api/switch", {"model": new_model})
-        self.model = new_model
+        self.model_name = new_model
         print(f"[CoreLLM SDK] ✓ Active model is now '{new_model}'.")
         return self
 
     def unload(self) -> dict:
         """Release the current model from server RAM."""
-        result = self._post("/api/unload", {"model": self.model})
-        print(f"[CoreLLM SDK] '{self.model}' unloaded from memory.")
+        result = self._post("/api/unload", {"model": self.model_name})
+        print(f"[CoreLLM SDK] '{self.model_name}' unloaded from memory.")
         return result
         
     def list_models(self) -> list[str]:
@@ -131,53 +167,21 @@ class CoreLLMChat(BaseChatModel):
         """Return server health and active model info."""
         return self._get("/")
 
-    # ── LangChain Core ────────────────────────────────────────────────────────
-
-    def _convert_messages(self, messages: List[BaseMessage]) -> List[dict]:
-        role_map = {
-            "human": "user",
-            "ai": "assistant",
-            "system": "system",
-            "function": "function",
-            "tool": "tool",
-        }
-        result = []
-        for m in messages:
-            role = role_map.get(m.type, m.type)
-            result.append({"role": role, "content": str(m.content)})
-        return result
-
-    def _generate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        msg_dicts = self._convert_messages(messages)
-        extra = {}
-        if stop:
-            extra["stop"] = stop
-
-        content = self.raw_chat(msg_dicts, **extra, **kwargs)
-        message = AIMessage(content=content)
-        return ChatResult(generations=[ChatGeneration(message=message)])
-
     # ── Additional Inference Endpoints ────────────────────────────────────────
 
     def raw_chat(self, messages: list[dict], **kwargs) -> str:
         """
         Multi-turn chat using the Ollama /api/chat endpoint.
         """
-        body = {"model": self.model, "messages": messages, "stream": False, **kwargs}
+        body = {"model": self.model_name, "messages": messages, "stream": False, **kwargs}
         result = self._post("/api/chat", body)
         return result.get("message", {}).get("content", "")
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def raw_generate(self, prompt: str, **kwargs) -> str:
         """
         Raw text completion using the Ollama /api/generate endpoint.
         """
-        body = {"model": self.model, "prompt": prompt, "stream": False, **kwargs}
+        body = {"model": self.model_name, "prompt": prompt, "stream": False, **kwargs}
         result = self._post("/api/generate", body)
         return result.get("response", "")
 
@@ -188,7 +192,7 @@ class CoreLLMChat(BaseChatModel):
         
         Returns the raw string content.
         """
-        body = {"model": self.model, "messages": messages, **kwargs}
+        body = {"model": self.model_name, "messages": messages, **kwargs}
         result = self._post("/v1/chat/completions", body)
         try:
             return result["choices"][0]["message"]["content"]

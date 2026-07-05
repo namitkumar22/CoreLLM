@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: corellm-sdk
-Version: 1.1.0
+Version: 1.1.1
 Summary: Python client for CoreLLM SDK — LLM gateway running Ollama on Hugging Face Spaces
 Author: Namit Kumar
 License: MIT
@@ -8,41 +8,19 @@ Keywords: llm,ollama,langchain,langgraph,huggingface,ai,corellm-sdk
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: httpx>=0.27
+Requires-Dist: langchain>=0.2
 Requires-Dist: langchain-core>=0.2
-Provides-Extra: langchain
-Requires-Dist: langchain>=0.2; extra == "langchain"
-Requires-Dist: langchain-core>=0.2; extra == "langchain"
-Provides-Extra: all
-Requires-Dist: langchain>=0.2; extra == "all"
-Requires-Dist: langchain-core>=0.2; extra == "all"
-Requires-Dist: langgraph>=0.1; extra == "all"
-
----
-title: CoreLLM SDK
-emoji: 🧠
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-pinned: false
----
+Requires-Dist: langgraph>=0.1
+Requires-Dist: langchain-openai>=0.1
 
 # CoreLLM SDK
 
-A fully-featured Python client and Hugging Face Space for running LLMs via Ollama — with native LangChain & LangGraph support. 
-
-`corellm-sdk` acts as an all-in-one unified model interface!
+The simplest way to use LLMs.
 
 ## 📦 Install from PyPI
 
 ```bash
-# Minimal installation (just the client)
 pip install corellm-sdk
-
-# With LangChain support
-pip install "corellm-sdk[langchain]"
-
-# With LangChain + LangGraph support
-pip install "corellm-sdk[all]"
 ```
 
 ## 🤖 Available Models
@@ -58,7 +36,7 @@ The following models are available on the server. **Do not use any other model n
 
 ## 🚀 Quickstart
 
-The new **CoreLLMChat** class wraps everything into a single, cohesive, Langchain-compatible chat model that also handles normal chat generation, raw completion, and OpenAI compatibility.
+The new **CoreLLMChat** class wraps everything into a single, cohesive, LangChain-compatible chat model.
 
 ```python
 from corellm_sdk import CoreLLMChat
@@ -90,19 +68,16 @@ chain = ChatPromptTemplate.from_messages([
 print(chain.invoke({"question": "What is Python?"}).content)
 ```
 
-## 💬 OpenAI Compatibility (`openai_chat`)
+## 🌐 Standard OpenAI & Groq Compatibility
 
-Have existing code using OpenAI structures? Just use the OpenAI method out of the box!
+You can use the standard `ChatOpenAI` or `ChatGroq` classes seamlessly as drop-in replacements for your LangChain workflows!
 
 ```python
-messages = [
-    {"role": "system", "content": "You are a witty assistant."},
-    {"role": "user", "content": "Tell me a joke."}
-]
+from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 
-# Calls the /v1/chat/completions endpoint just like OpenAI
-response = llm.openai_chat(messages, temperature=0.7)
-print(response)
+llm_openai = ChatOpenAI(model="gemma4:e4b")
+llm_groq = ChatGroq(model="gemma4:e4b")
 ```
 
 ## 🛠 Raw APIs (`raw_chat` & `generate`)

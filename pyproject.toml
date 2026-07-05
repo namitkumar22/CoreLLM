@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corellm-sdk"
-version = "1.1.1"
-description = "Python client for CoreLLM SDK — LLM gateway running Ollama on Hugging Face Spaces"
+version = "1.1.2"
+description = "The simplest way to use LLMs"
 readme = "PYPI_README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -18,6 +18,7 @@ dependencies = [
     "langchain>=0.2",
     "langchain-core>=0.2",
     "langgraph>=0.1",
+    "langchain-openai>=0.1",
 ]
 
 [tool.setuptools]

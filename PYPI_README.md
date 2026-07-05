@@ -53,25 +53,13 @@ chain = ChatPromptTemplate.from_messages([
 print(chain.invoke({"question": "What is Python?"}).content)
 ```
 
-## 🌐 Standard OpenAI & Groq Compatibility
-
-You can use the standard `ChatOpenAI` or `ChatGroq` classes seamlessly as drop-in replacements for your LangChain workflows!
-
-```python
-from langchain_openai import ChatOpenAI
-from langchain_groq import ChatGroq
-
-llm_openai = ChatOpenAI(model="gemma4:e4b")
-llm_groq = ChatGroq(model="gemma4:e4b")
-```
-
-## 🛠 Raw APIs (`raw_chat` & `generate`)
+## 🛠 Raw APIs (`raw_chat` & `raw_generate`)
 
 If you want simpler formats:
 
 ```python
 # Raw Prompt Completion
-print(llm.generate("Explain quantum physics in 1 sentence."))
+print(llm.raw_generate("Explain quantum physics in 1 sentence."))
 
 # Standard Dict Chat
 messages = [{"role": "user", "content": "Who are you?"}]
@@ -85,5 +73,5 @@ Switch models on the fly! The backend dynamically handles memory constraints and
 # Switch to another allowed model on your server!
 llm.switch("devstral:24b")
 
-print(llm.generate("Hello from Devstral!"))
+print(llm.raw_generate("Hello from Devstral!"))
 ```

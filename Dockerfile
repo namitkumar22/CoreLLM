@@ -31,7 +31,7 @@ ENV HOME=/home/user \
     # Models must be listed HERE so they are downloaded during the Docker build.
     # This value is also used as the runtime allowlist.
     # To add/remove models: edit this line, then push to trigger a rebuild.
-    ALLOWED_MODELS="gemma4:e4b,devstral:24b,cogito:14b,ornith:9b,lfm2.5-thinking:1.2b,qwen3-embedding:8b,robit/ornith-vision:9b" \
+    ALLOWED_MODELS="lfm2.5-thinking:1.2b" \
     # Optional Bearer token — override this via HF Space Secret at runtime
     API_KEY=""
 
