@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corellm-engine"
-version = "1.0.0"
-description = "Python client for CoreLLM — LLM gateway running Ollama on Hugging Face Spaces"
+version = "1.1.0"
+description = "Python client for CoreLLM Engine — LLM gateway running Ollama on Hugging Face Spaces"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "Namit Kumar" }]
 
-keywords = ["llm", "ollama", "langchain", "langgraph", "huggingface", "ai"]
+keywords = ["llm", "ollama", "langchain", "langgraph", "huggingface", "ai", "corellm-engine"]
 
 dependencies = [
     "httpx>=0.27",
@@ -19,12 +19,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# pip install corellm[langchain]  — installs full LangChain stack
+# pip install corellm-engine[langchain]
 langchain = [
     "langchain>=0.2",
     "langchain-core>=0.2",
 ]
-# pip install corellm[all]  — everything including LangGraph
+# pip install corellm-engine[all]
 all = [
     "langchain>=0.2",
     "langchain-core>=0.2",
@@ -32,5 +32,5 @@ all = [
 ]
 
 [tool.setuptools]
-# corellm.py is a single-file module at the root
-py-modules = ["corellm"]
+# corellm_engine.py is a single-file module at the root
+py-modules = ["corellm_engine"]
