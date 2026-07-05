@@ -1,0 +1,3 @@
+gemma4:e4b
+devstral:24b
+cogito:14b
