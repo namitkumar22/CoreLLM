@@ -45,7 +45,9 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # we log requests ourselves
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_KEY       = os.environ.get("API_KEY", "")
+API_KEY       = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "")
+if API_KEY == "CHANGE_ME":
+    API_KEY = ""
 OLLAMA_URL    = "http://127.0.0.1:11434"
 _allowed_raw  = os.environ.get("ALLOWED_MODELS", "")
 ALLOWED_MODELS: list[str] = (
