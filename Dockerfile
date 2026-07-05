@@ -10,7 +10,7 @@
 FROM python:3.11-slim
 
 # ── System deps + Ollama binary (runs as root during build) ──────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+RUN apt-get update && apt-get install -y --no-install-recommends curl zstd && \
     curl -fsSL https://ollama.com/install.sh | sh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
