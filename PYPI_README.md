@@ -1,12 +1,3 @@
----
-title: CoreLLM SDK
-emoji: 🧠
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-pinned: false
----
-
 # CoreLLM SDK
 
 The simplest way to use LLMs.
