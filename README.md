@@ -64,7 +64,7 @@ print(chain.invoke({"question": "What is Python?"}).content)
 
 ## 🌐 Standard OpenAI & Groq Compatibility
 
-You can use the standard `ChatOpenAI` or `ChatGroq` classes without cluttering your code with URLs or API keys by simply setting the environment variables at the top of your script!
+You can use the standard `ChatOpenAI` or `ChatGroq` classes seamlessly as drop-in replacements for your LangChain workflows!
 
 ```python
 from langchain_openai import ChatOpenAI
