@@ -1,0 +1,8 @@
+README.md
+corellm_sdk.py
+pyproject.toml
+corellm_sdk.egg-info/PKG-INFO
+corellm_sdk.egg-info/SOURCES.txt
+corellm_sdk.egg-info/dependency_links.txt
+corellm_sdk.egg-info/requires.txt
+corellm_sdk.egg-info/top_level.txt

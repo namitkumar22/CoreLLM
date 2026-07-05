@@ -1,11 +1,11 @@
 """
-CoreLLM Engine Python Client SDK
-================================
+CoreLLM SDK Python Client
+=========================
 A LangChain-native chat model client for your CoreLLM Hugging Face Space.
 
 Usage
 -----
-    from corellm_engine import CoreLLMChat
+    from corellm_sdk import CoreLLMChat
     from langchain_core.messages import HumanMessage
     
     llm = CoreLLMChat(
@@ -72,7 +72,7 @@ class CoreLLMChat(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "corellm_engine"
+        return "corellm_sdk"
 
     @property
     def _identifying_params(self) -> Mapping[str, Any]:
@@ -97,12 +97,12 @@ class CoreLLMChat(BaseChatModel):
             return r.json()
 
     def _preload(self, model: str):
-        print(f"[CoreLLM Engine] Pre-warming '{model}' on server...")
+        print(f"[CoreLLM SDK] Pre-warming '{model}' on server...")
         try:
             self._post("/api/load", {"model": model})
-            print(f"[CoreLLM Engine] ✓ '{model}' is ready.")
+            print(f"[CoreLLM SDK] ✓ '{model}' is ready.")
         except Exception as e:
-            print(f"[CoreLLM Engine] Failed to pre-warm model: {e}")
+            print(f"[CoreLLM SDK] Failed to pre-warm model: {e}")
 
     # ── Model control ─────────────────────────────────────────────────────────
 
@@ -111,16 +111,16 @@ class CoreLLMChat(BaseChatModel):
         Switch the active model on the server and update this instance.
         Previous model is unloaded from RAM automatically.
         """
-        print(f"[CoreLLM Engine] Switching '{self.model}' → '{new_model}'...")
+        print(f"[CoreLLM SDK] Switching '{self.model}' → '{new_model}'...")
         self._post("/api/switch", {"model": new_model})
         self.model = new_model
-        print(f"[CoreLLM Engine] ✓ Active model is now '{new_model}'.")
+        print(f"[CoreLLM SDK] ✓ Active model is now '{new_model}'.")
         return self
 
     def unload(self) -> dict:
         """Release the current model from server RAM."""
         result = self._post("/api/unload", {"model": self.model})
-        print(f"[CoreLLM Engine] '{self.model}' unloaded from memory.")
+        print(f"[CoreLLM SDK] '{self.model}' unloaded from memory.")
         return result
         
     def list_models(self) -> list[str]:
