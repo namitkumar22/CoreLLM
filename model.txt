@@ -1,3 +1,7 @@
-gemma4:e4b
-devstral:24b
-cogito:14b
+"gemma4:e4b" - text, vision, tools, thinking, audio, context=128k
+"devstral:24b" - text, tools, context=128k
+"cogito:14b" - text, tools, thinking, context=128k
+"ornith:9b" - Text, thinking, tools, context=256k
+"lfm2.5-thinking:1.2b" - ultra fast, tools, thinking, context=32k, 
+"qwen3-embedding:8b" - embedding
+"robit/ornith-vision:9b" - vision, tools, thinking
