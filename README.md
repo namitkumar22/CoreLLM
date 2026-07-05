@@ -1,3 +1,12 @@
+---
+title: CoreLLM
+emoji: 🧠
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # CoreLLM
 
 A Python client and Hugging Face Space for running LLMs via Ollama — with LangChain & LangGraph support.

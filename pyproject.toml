@@ -1,15 +1,15 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "corellm"
+name = "corellm-engine"
 version = "1.0.0"
 description = "Python client for CoreLLM — LLM gateway running Ollama on Hugging Face Spaces"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-authors = [{ name = "Namit Kumar", email = "" }]
+authors = [{ name = "Namit Kumar" }]
 
 keywords = ["llm", "ollama", "langchain", "langgraph", "huggingface", "ai"]
 
