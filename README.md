@@ -30,7 +30,7 @@ The following models are available on the server. **Do not use any other model n
 
 ## 🚀 Quickstart
 
-The new **CoreLLMChat** class wraps everything into a single, cohesive, Langchain-compatible chat model that also handles normal chat generation, raw completion, and OpenAI compatibility.
+The new **CoreLLMChat** class wraps everything into a single, cohesive, LangChain-compatible chat model.
 
 ```python
 from corellm_sdk import CoreLLMChat
@@ -62,19 +62,22 @@ chain = ChatPromptTemplate.from_messages([
 print(chain.invoke({"question": "What is Python?"}).content)
 ```
 
-## 💬 OpenAI Compatibility (`openai_chat`)
+## 🌐 Standard OpenAI SDK Integration
 
-Have existing code using OpenAI structures? Just use the OpenAI method out of the box!
+Since CoreLLM is fully OpenAI-compatible, you can also use the standard LangChain OpenAI classes directly by simply pointing the `base_url` to your Hugging Face Space.
 
 ```python
-messages = [
-    {"role": "system", "content": "You are a witty assistant."},
-    {"role": "user", "content": "Tell me a joke."}
-]
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 
-# Calls the /v1/chat/completions endpoint just like OpenAI
-response = llm.openai_chat(messages, temperature=0.7)
-print(response)
+llm = ChatOpenAI(
+    model="gemma4:e4b",
+    base_url="https://namitkumar22-corellm.hf.space/v1",
+    api_key="your-api-key"
+)
+
+response = llm.invoke([HumanMessage(content="Hello!")])
+print(response.content)
 ```
 
 ## 🛠 Raw APIs (`raw_chat` & `generate`)
