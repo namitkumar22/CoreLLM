@@ -26,12 +26,13 @@ ENV HOME=/home/user \
     # Ollama stores models here (user-owned, not /root)
     OLLAMA_HOME=/home/user/.ollama \
     OLLAMA_MODELS=/home/user/.ollama/models \
-    # ── Edit this list to control which models are baked in ──────────────────
-    # These are the ONLY models that will be accepted at runtime.
-    # Separate multiple models with commas. No spaces.
-    # Example: "qwen2.5:1.5b,llama3.2:3b,phi3:mini"
-    ALLOWED_MODELS="qwen2.5:1.5b" \
-    # Optional Bearer token (leave empty = public access)
+    # ── IMPORTANT ────────────────────────────────────────────────────────────
+    # HF Space secrets/variables are NOT available at build time.
+    # Models must be listed HERE so they are downloaded during the Docker build.
+    # This value is also used as the runtime allowlist.
+    # To add/remove models: edit this line, then push to trigger a rebuild.
+    ALLOWED_MODELS="gemma4:e4b,devstral:24b,cogito:14b,ornith:9b,lfm2.5-thinking:1.2b,qwen3-embedding:8b,robit/ornith-vision:9b" \
+    # Optional Bearer token — override this via HF Space Secret at runtime
     API_KEY=""
 
 # ── Pre-download all ALLOWED_MODELS at build time ────────────────────────────
