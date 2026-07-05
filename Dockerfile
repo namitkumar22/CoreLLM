@@ -33,7 +33,7 @@ ENV HOME=/home/user \
     # To add/remove models: edit this line, then push to trigger a rebuild.
     ALLOWED_MODELS="lfm2.5-thinking:1.2b" \
     # Optional Bearer token — override this via HF Space Secret at runtime
-    API_KEY=""
+    API_KEY="CHANGE_ME"
 
 # ── Pre-download all ALLOWED_MODELS at build time ────────────────────────────
 # Start Ollama in the background, pull every model, then shut it down.
