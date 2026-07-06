@@ -1,0 +1,6 @@
+# CoreLLM — server-side dependencies (for modal_app.py image build)
+# Install locally to run `modal deploy` and `modal run`
+modal
+fastapi
+uvicorn[standard]
+httpx

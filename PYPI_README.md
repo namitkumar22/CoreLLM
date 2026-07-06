@@ -1,77 +1,145 @@
 # CoreLLM SDK
 
-The simplest way to use LLMs.
-
-## 📦 Install from PyPI
+**The simplest way to use powerful LLMs — no API key, no setup.**
 
 ```bash
 pip install corellm-sdk
 ```
 
+---
+
 ## 🤖 Available Models
 
-The following models are available on the server. **Do not use any other model names.**
-- `"gemma4:e4b"` - text, vision, tools, thinking, audio, context=128k
-- `"devstral:24b"` - text, tools, context=128k
-- `"cogito:14b"` - text, tools, thinking, context=128k
-- `"ornith:9b"` - Text, thinking, tools, context=256k
-- `"lfm2.5-thinking:1.2b"` - ultra fast, tools, thinking, context=32k
-- `"qwen3-embedding:8b"` - embedding
-- `"robit/ornith-vision:9b"` - vision, tools, thinking
+| Model | Tier | Capabilities | Context |
+|-------|------|-------------|---------|
+| `nemotron-3-super:120b` | Heavy | text, tools, thinking | 256k |
+| `qwen3-vl:32b` | Heavy | text, vision, tools, thinking | 256k |
+| `lfm2.5-thinking:1.2b` | Light | ultra fast, tools, thinking | 32k |
+| `qwen3-embedding:8b` | Light | embedding | — |
+
+---
 
 ## 🚀 Quickstart
 
-The new **CoreLLMChat** class wraps everything into a single, cohesive, LangChain-compatible chat model.
-
 ```python
-from corellm_sdk import CoreLLMChat
+from corellm_sdk import CoreLLMChat, HEAVY_ENDPOINT, LIGHT_ENDPOINT
 
-# Initialize the engine
+# Heavy model (nemotron-super on H200)
 llm = CoreLLMChat(
-    model="gemma4:e4b"
+    model="nemotron-3-super:120b",
+    base_url=HEAVY_ENDPOINT,
+)
+
+# Light / fast model (A10G)
+fast_llm = CoreLLMChat(
+    model="lfm2.5-thinking:1.2b",
+    base_url=LIGHT_ENDPOINT,
 )
 ```
 
-## 🧩 LangChain & LangGraph Support
+---
 
-Use it seamlessly with your existing LangChain workflows:
+## 🧩 LangChain & LangGraph
+
+Full drop-in replacement for `ChatOpenAI` — agents, `bind_tools`, LCEL, streaming all work out of the box.
 
 ```python
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-# Direct usage
-response = llm.invoke([HumanMessage(content="Hello!")])
+# Direct invocation
+response = llm.invoke([HumanMessage(content="Explain transformers in 2 sentences.")])
 print(response.content)
 
-# With Chains
+# LCEL chain
 chain = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant."),
+    ("system", "You are a concise assistant."),
     ("human", "{question}"),
 ]) | llm
 
 print(chain.invoke({"question": "What is Python?"}).content)
+
+# Tool binding (LangGraph agents)
+from langchain_core.tools import tool
+
+@tool
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"Sunny in {city}"
+
+agent_llm = llm.bind_tools([get_weather])
+result = agent_llm.invoke([HumanMessage(content="What's the weather in London?")])
+print(result.tool_calls)
 ```
 
-## 🛠 Raw APIs (`raw_chat` & `raw_generate`)
+---
 
-If you want simpler formats:
+## ⚡ Raw APIs
 
 ```python
-# Raw Prompt Completion
-print(llm.raw_generate("Explain quantum physics in 1 sentence."))
+# Simple prompt completion
+print(llm.raw_generate("Write a haiku about the ocean."))
 
-# Standard Dict Chat
-messages = [{"role": "user", "content": "Who are you?"}]
+# Multi-turn chat
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user",   "content": "What is the capital of France?"},
+]
 print(llm.raw_chat(messages))
+
+# OpenAI-format response
+print(llm.openai_chat([{"role": "user", "content": "Hello!"}]))
 ```
 
-## 🔄 Dynamic Model Switching
-Switch models on the fly! The backend dynamically handles memory constraints and load transitions.
+---
+
+## 🔢 Embeddings
 
 ```python
-# Switch to another allowed model on your server!
-llm.switch("devstral:24b")
+from corellm_sdk import CoreLLMChat, LIGHT_ENDPOINT
 
-print(llm.raw_generate("Hello from Devstral!"))
+embed_llm = CoreLLMChat(
+    model="qwen3-embedding:8b",
+    base_url=LIGHT_ENDPOINT,
+)
+
+vector = embed_llm.embed("The quick brown fox")
+print(len(vector), "dimensions")
+```
+
+---
+
+## 🔄 Model Switching
+
+```python
+# Switch from nemotron-super to gemma4:31b on the fly
+llm.switch("gemma4:31b")
+print(llm.raw_generate("Describe this image."))
+
+# Switch back
+llm.switch("nemotron-super")
+```
+
+---
+
+## 🛠 Server Utilities
+
+```python
+# Check server status
+print(llm.status())
+
+# List all models available on this endpoint
+print(llm.list_models())
+
+# Manually release a model from VRAM
+llm.unload()
+```
+
+---
+
+## Environment Variable
+
+```bash
+# Override the default base URL for all CoreLLMChat instances
+export CORELLM_BASE_URL=https://your-custom-endpoint.modal.run
 ```

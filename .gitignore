@@ -1,1 +1,10 @@
+# local build artifacts
+dist/
+.dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# secrets / private notes
 model.txt
+.env

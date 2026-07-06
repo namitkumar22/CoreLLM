@@ -9,51 +9,56 @@ pinned: false
 
 # CoreLLM SDK
 
-The simplest way to use LLMs.
-
-## 📦 Install from PyPI
+**The simplest way to use powerful LLMs — no API key, no setup.**
 
 ```bash
 pip install corellm-sdk
 ```
 
+---
+
 ## 🤖 Available Models
 
-The following models are available on the server. **Do not use any other model names.**
-- `"gemma4:e4b"` - text, vision, tools, thinking, audio, context=128k
-- `"devstral:24b"` - text, tools, context=128k
-- `"cogito:14b"` - text, tools, thinking, context=128k
-- `"ornith:9b"` - Text, thinking, tools, context=256k
-- `"lfm2.5-thinking:1.2b"` - ultra fast, tools, thinking, context=32k
-- `"qwen3-embedding:8b"` - embedding
-- `"robit/ornith-vision:9b"` - vision, tools, thinking
+| Model | Tier | Capabilities | Context |
+|-------|------|-------------|---------|
+| `nemotron-3-super:120b` | Heavy | text, tools, thinking | 256k |
+| `qwen3-vl:32b` | Heavy | text, vision, tools, thinking | 256k |
+| `lfm2.5-thinking:1.2b` | Light | ultra fast, tools, thinking | 32k |
+| `qwen3-embedding:8b` | Light | embedding | — |
+
+---
 
 ## 🚀 Quickstart
 
-The new **CoreLLMChat** class wraps everything into a single, cohesive, LangChain-compatible chat model.
-
 ```python
-from corellm_sdk import CoreLLMChat
+from corellm_sdk import CoreLLMChat, HEAVY_ENDPOINT, LIGHT_ENDPOINT
 
-# Initialize the engine
+# Heavy model (nemotron-super)
 llm = CoreLLMChat(
-    model="gemma4:e4b"
+    model="nemotron-3-super:120b",
+    base_url=HEAVY_ENDPOINT,
+)
+
+# Light / fast model
+fast_llm = CoreLLMChat(
+    model="lfm2.5-thinking:1.2b",
+    base_url=LIGHT_ENDPOINT,
 )
 ```
 
-## 🧩 LangChain & LangGraph Support
+---
 
-Use it seamlessly with your existing LangChain workflows:
+## 🧩 LangChain & LangGraph
 
 ```python
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-# Direct usage
+# Direct invocation
 response = llm.invoke([HumanMessage(content="Hello!")])
 print(response.content)
 
-# With Chains
+# LCEL chain
 chain = ChatPromptTemplate.from_messages([
     ("system", "You are a helpful assistant."),
     ("human", "{question}"),
@@ -62,25 +67,29 @@ chain = ChatPromptTemplate.from_messages([
 print(chain.invoke({"question": "What is Python?"}).content)
 ```
 
-## 🛠 Raw APIs (`raw_chat` & `raw_generate`)
+---
 
-If you want simpler formats:
+## ⚡ Raw APIs
 
 ```python
-# Raw Prompt Completion
-print(llm.raw_generate("Explain quantum physics in 1 sentence."))
-
-# Standard Dict Chat
-messages = [{"role": "user", "content": "Who are you?"}]
-print(llm.raw_chat(messages))
+print(llm.raw_generate("Explain quantum physics in one sentence."))
+print(llm.raw_chat([{"role": "user", "content": "Who are you?"}]))
 ```
 
-## 🔄 Dynamic Model Switching
-Switch models on the fly! The backend dynamically handles memory constraints and load transitions.
+---
+
+## 🔢 Embeddings
 
 ```python
-# Switch to another allowed model on your server!
-llm.switch("devstral:24b")
+embed_llm = CoreLLMChat(model="qwen3-embedding:8b", base_url=LIGHT_ENDPOINT)
+vector = embed_llm.embed("Some text to embed")
+```
 
-print(llm.raw_generate("Hello from Devstral!"))
+---
+
+## 🔄 Model Switching
+
+```python
+llm.switch("gemma4:31b")
+print(llm.raw_generate("Describe what you see."))
 ```
