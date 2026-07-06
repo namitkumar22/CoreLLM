@@ -10,30 +10,27 @@ pip install corellm-sdk
 
 ## 🤖 Available Models
 
-| Model | Tier | Capabilities | Context |
-|-------|------|-------------|---------|
-| `nemotron-3-super:120b` | Heavy | text, tools, thinking | 256k |
-| `qwen3-vl:32b` | Heavy | text, vision, tools, thinking | 256k |
-| `lfm2.5-thinking:1.2b` | Light | ultra fast, tools, thinking | 32k |
-| `qwen3-embedding:8b` | Light | embedding | — |
+All models run on a single endpoint (4× A10G, 96 GB VRAM).
+Models are loaded into VRAM **on demand** — only the model you call is active.
+
+| Model | Capabilities | Context |
+|-------|-------------|---------|
+| `qwen3.6:35b` | coding, text, tools, thinking | 256k |
+| `qwen3-vl:32b` | vision, text, tools, thinking | 256k |
+| `nemotron3:33b` | audio, text, tools, vision, thinking | — |
+| `lfm2.5-thinking:1.2b` | ultra fast, tools, thinking | 32k |
+| `qwen3-embedding:8b` | embedding | — |
 
 ---
 
 ## 🚀 Quickstart
 
 ```python
-from corellm_sdk import CoreLLMChat, HEAVY_ENDPOINT, LIGHT_ENDPOINT
+from corellm_sdk import CoreLLMChat, ENDPOINT
 
-# Heavy model (nemotron-super on H200)
 llm = CoreLLMChat(
-    model="nemotron-3-super:120b",
-    base_url=HEAVY_ENDPOINT,
-)
-
-# Light / fast model (A10G)
-fast_llm = CoreLLMChat(
-    model="lfm2.5-thinking:1.2b",
-    base_url=LIGHT_ENDPOINT,
+    model="qwen3.6:35b",
+    base_url=ENDPOINT,
 )
 ```
 
@@ -41,7 +38,7 @@ fast_llm = CoreLLMChat(
 
 ## 🧩 LangChain & LangGraph
 
-Full drop-in replacement for `ChatOpenAI` — agents, `bind_tools`, LCEL, streaming all work out of the box.
+Full drop-in replacement for `ChatOpenAI` — agents, `bind_tools`, LCEL chains, streaming all work.
 
 ```python
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -96,13 +93,7 @@ print(llm.openai_chat([{"role": "user", "content": "Hello!"}]))
 ## 🔢 Embeddings
 
 ```python
-from corellm_sdk import CoreLLMChat, LIGHT_ENDPOINT
-
-embed_llm = CoreLLMChat(
-    model="qwen3-embedding:8b",
-    base_url=LIGHT_ENDPOINT,
-)
-
+embed_llm = CoreLLMChat(model="qwen3-embedding:8b")
 vector = embed_llm.embed("The quick brown fox")
 print(len(vector), "dimensions")
 ```
@@ -112,12 +103,13 @@ print(len(vector), "dimensions")
 ## 🔄 Model Switching
 
 ```python
-# Switch from nemotron-super to gemma4:31b on the fly
-llm.switch("gemma4:31b")
+# Switch from qwen3.6 to vision model on the fly
+# Previous model is automatically unloaded from VRAM
+llm.switch("qwen3-vl:32b")
 print(llm.raw_generate("Describe this image."))
 
-# Switch back
-llm.switch("nemotron-super")
+# Switch to ultra-fast model
+llm.switch("lfm2.5-thinking:1.2b")
 ```
 
 ---
@@ -125,13 +117,13 @@ llm.switch("nemotron-super")
 ## 🛠 Server Utilities
 
 ```python
-# Check server status
+# Check server status and which model is currently in VRAM
 print(llm.status())
 
-# List all models available on this endpoint
+# List all models available on disk
 print(llm.list_models())
 
-# Manually release a model from VRAM
+# Manually release current model from VRAM
 llm.unload()
 ```
 
@@ -140,6 +132,6 @@ llm.unload()
 ## Environment Variable
 
 ```bash
-# Override the default base URL for all CoreLLMChat instances
+# Override the default endpoint for all CoreLLMChat instances
 export CORELLM_BASE_URL=https://your-custom-endpoint.modal.run
 ```

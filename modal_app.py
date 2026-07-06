@@ -3,20 +3,38 @@ CoreLLM – Modal deployment (cost-optimised, no auth)
 
 Architecture
 ------------
-  CoreLLMHeavy  → NVIDIA H200  (141 GB VRAM) — nemotron-3-super:120b, qwen3-vl:32b
-  CoreLLMLight  → NVIDIA A10G  (24 GB VRAM)  — lfm2.5-thinking:1.2b, qwen3-embedding:8b
+  Single service: 4× NVIDIA A10G (96 GB VRAM total)
 
-Both tiers share one persistent Modal Volume ("corellm-models") so models are
-downloaded exactly ONCE and reused across all cold starts.
+  All models on one endpoint:
+    "qwen3.6:35b"           – coding, text, tools, thinking,        context=256k
+    "qwen3-vl:32b"          – vision, text, tools, thinking,        context=256k
+    "nemotron3:33b"         – audio, text, tools, vision, thinking
+    "lfm2.5-thinking:1.2b"  – ultra fast, tools, thinking,         context=32k
+    "qwen3-embedding:8b"    – embedding
+
+Resource strategy
+-----------------
+  ┌─ @enter (cold start) ─────────────────────────────────────────┐
+  │  • Start Ollama server                                         │
+  │  • Verify all models are on disk (pulled once via seeder job)  │
+  │  • Nothing loaded into VRAM yet → snapshot captures this state │
+  └────────────────────────────────────────────────────────────────┘
+  ┌─ On request for model X ──────────────────────────────────────┐
+  │  • If X already in VRAM → serve immediately (0 overhead)      │
+  │  • If different model Y in VRAM → unload Y, load X, serve     │
+  │  • Only ONE model lives in VRAM at a time                      │
+  │    → 4×A10G (96 GB) can hold any model comfortably            │
+  └────────────────────────────────────────────────────────────────┘
 
 Cost controls
 -------------
-  min_containers=0       → $0 when idle — containers only exist during active calls
-  container_idle_timeout → 5 min warm window after last request (avoids repeated cold starts)
-  enable_memory_snapshot → GPU state is checkpointed; cold start drops ~60 s → ~5 s
-  A10G for light tier    → 3× faster than T4 at comparable cost for small models
+  min_containers=0       → $0 when idle (containers exist only during calls)
+  scaledown_window=60    → check idle every 60 s for fine-grained billing
+  container_idle_timeout → no explicit timeout; Modal default keeps container 5 min warm
+  enable_memory_snapshot → Ollama server state is snapshotted;
+                           cold start = resume from snapshot (~5s) + on-demand model load
 
-All endpoints are open (no API key required).
+All endpoints are open — no API key required.
 """
 
 import os
@@ -24,7 +42,6 @@ import time
 import subprocess
 import asyncio
 import logging
-from typing import Optional
 
 import modal
 from fastapi import FastAPI, Request, HTTPException
@@ -32,11 +49,21 @@ from fastapi.responses import JSONResponse
 
 # ── Modal primitives ───────────────────────────────────────────────────────────
 
-# Persistent volume — model blobs live here, survive container restarts forever
+# Persistent volume: model blobs live here, survive forever across cold starts.
+# Populated ONCE by running:  modal run modal_app.py::pull_all_models
 model_volume = modal.Volume.from_name("corellm-models", create_if_missing=True)
 
-VOLUME_MOUNT = "/models"  # where the volume is mounted inside every container
+VOLUME_MOUNT = "/models"
 OLLAMA_URL   = "http://127.0.0.1:11434"
+
+# All 5 models
+ALL_MODELS = [
+    "qwen3.6:35b",           # coding, text, tools, thinking, 256k ctx
+    "qwen3-vl:32b",          # vision, text, tools, thinking, 256k ctx
+    "nemotron3:33b",         # audio, text, tools, vision, thinking
+    "lfm2.5-thinking:1.2b",  # ultra fast, tools, thinking, 32k ctx
+    "qwen3-embedding:8b",    # embedding
+]
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -68,6 +95,9 @@ def _start_ollama() -> subprocess.Popen:
         **os.environ,
         "OLLAMA_MODELS": VOLUME_MOUNT,
         "OLLAMA_HOME":   "/tmp/ollama_home",
+        # Let Ollama use all 4 GPUs for the active model
+        "OLLAMA_NUM_PARALLEL": "1",   # 1 request at a time — maximises VRAM per model
+        "OLLAMA_MAX_LOADED_MODELS": "1",  # hard cap: only 1 model in VRAM at a time
     }
     os.makedirs("/tmp/ollama_home", exist_ok=True)
 
@@ -81,7 +111,7 @@ def _start_ollama() -> subprocess.Popen:
     for attempt in range(30):
         try:
             if _httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2).status_code == 200:
-                log.info(f"Ollama ready ({attempt + 1}s)")
+                log.info(f"Ollama ready ({attempt + 1}s) — 0 models in VRAM")
                 return proc
         except Exception:
             pass
@@ -89,34 +119,45 @@ def _start_ollama() -> subprocess.Popen:
     raise RuntimeError("Ollama did not start within 30 s")
 
 
-def _pull_if_missing(model: str):
-    """Pull a model into the persistent volume only if it isn't cached yet."""
-    env = {**os.environ, "OLLAMA_MODELS": VOLUME_MOUNT}
-    result = subprocess.run(["ollama", "list"], capture_output=True, text=True, env=env)
-    tag = model.split(":")[0]
-    if tag in result.stdout or model in result.stdout:
-        log.info(f"'{model}' already cached — skipping pull")
-        return
-    log.info(f"Pulling '{model}' into volume (first time only)...")
-    subprocess.run(["ollama", "pull", model], check=True, env=env)
-    log.info(f"'{model}' cached ✓")
-
-
-def _build_gateway(allowed_models: list[str]) -> FastAPI:
+def _verify_models_on_disk():
     """
-    Build and return a FastAPI app that proxies Ollama with auto-model-switching.
-    No authentication — fully open.
+    Verify all models are present in the volume.
+    Logs a warning for any missing ones (run pull_all_models to fix).
+    Does NOT load anything into VRAM.
+    """
+    env    = {**os.environ, "OLLAMA_MODELS": VOLUME_MOUNT}
+    result = subprocess.run(["ollama", "list"], capture_output=True, text=True, env=env)
+    on_disk = result.stdout
+
+    for model in ALL_MODELS:
+        tag = model.split(":")[0]
+        if tag in on_disk or model in on_disk:
+            log.info(f"  ✓ '{model}' on disk")
+        else:
+            log.warning(f"  ✗ '{model}' NOT on disk — run: modal run modal_app.py::pull_all_models")
+
+
+# ── Gateway factory ───────────────────────────────────────────────────────────
+
+def _build_gateway() -> FastAPI:
+    """
+    FastAPI gateway that proxies Ollama with on-demand VRAM management.
+    Models are loaded into VRAM only when first requested.
+    Only one model lives in VRAM at a time.
     """
     import httpx as _httpx
 
     web = FastAPI(title="CoreLLM", version="2.0.0")
+
+    # Track which model is currently in VRAM
     _active: dict = {"model": None}
+    # Serialize model switches so concurrent requests don't race
     _lock = asyncio.Lock()
 
     # ── Middleware ─────────────────────────────────────────────────────────────
 
     @web.middleware("http")
-    async def _log(request: Request, call_next):
+    async def _log_requests(request: Request, call_next):
         t = time.perf_counter()
         log.info(f"→ {request.method} {request.url.path}")
         try:
@@ -129,13 +170,13 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
         log.log(level, f"← {request.url.path}  [{resp.status_code}]  {ms:.0f}ms")
         return resp
 
-    # ── Validation ─────────────────────────────────────────────────────────────
+    # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _check_allowed(model: str):
-        if allowed_models and model not in allowed_models:
+        if model not in ALL_MODELS:
             raise HTTPException(
                 status_code=403,
-                detail=f"Model '{model}' not available. Allowed: {allowed_models}",
+                detail=f"Model '{model}' not available. Allowed: {ALL_MODELS}",
             )
 
     def _resolve_model(body: dict) -> str:
@@ -147,48 +188,70 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
             )
         return m
 
-    # ── Ollama operations ──────────────────────────────────────────────────────
-
     async def _ollama_post(path: str, body: dict) -> dict:
         async with _httpx.AsyncClient(timeout=600) as c:
             r = await c.post(f"{OLLAMA_URL}{path}", json=body)
             r.raise_for_status()
             return r.json()
 
-    async def _unload(model: str):
-        log.info(f"UNLOAD '{model}'...")
+    async def _unload_from_vram(model: str):
+        """Release model from VRAM. It stays on disk — no re-download needed."""
+        log.info(f"VRAM  unloading '{model}'...")
         try:
             async with _httpx.AsyncClient(timeout=30) as c:
-                await c.post(f"{OLLAMA_URL}/api/generate",
-                             json={"model": model, "prompt": "", "keep_alive": 0})
+                await c.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={"model": model, "prompt": "", "keep_alive": 0},
+                )
+            log.info(f"VRAM  '{model}' released")
         except Exception as e:
-            log.warning(f"UNLOAD failed (non-fatal): {e}")
+            log.warning(f"VRAM  unload failed (non-fatal): {e}")
 
-    async def _load(model: str):
-        log.info(f"LOAD '{model}' into VRAM (keep_alive=-1)...")
+    async def _load_into_vram(model: str):
+        """
+        Load model from disk into VRAM on-demand.
+        keep_alive=-1 → stays resident until we explicitly unload it.
+        Spans all 4 A10G GPUs automatically via Ollama's CUDA backend.
+        """
+        log.info(f"VRAM  loading '{model}' on demand (from disk)...")
         t = time.perf_counter()
-        async with _httpx.AsyncClient(timeout=300) as c:
-            await c.post(f"{OLLAMA_URL}/api/generate",
-                         json={"model": model, "prompt": "", "keep_alive": -1})
-        log.info(f"LOAD '{model}' ready  [{(time.perf_counter()-t)*1000:.0f}ms]")
+        async with _httpx.AsyncClient(timeout=600) as c:
+            await c.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={"model": model, "prompt": "", "keep_alive": -1},
+            )
+        log.info(f"VRAM  '{model}' ready  [{(time.perf_counter()-t)*1000:.0f}ms]")
 
-    async def _ensure(model: str):
+    async def _ensure_in_vram(model: str):
+        """
+        Guarantee 'model' is in VRAM before serving a request.
+        - Already active → instant return (no overhead)
+        - Different model active → unload it, load requested model
+        Uses a lock so concurrent requests serialize here, not race.
+        """
+        # Fast path — no lock needed if already active
         if _active["model"] == model:
             return
+
         async with _lock:
+            # Re-check inside lock: another coroutine may have switched already
             if _active["model"] == model:
                 return
+
             prev = _active["model"]
-            log.info(f"SWITCH '{prev}' → '{model}'")
             if prev:
-                await _unload(prev)
-            await _load(model)
+                log.info(f"SWITCH  '{prev}' → '{model}'")
+                await _unload_from_vram(prev)
+            else:
+                log.info(f"LOAD  first request → loading '{model}' into VRAM")
+
+            await _load_into_vram(model)
             _active["model"] = model
 
     # ── Exception handler ──────────────────────────────────────────────────────
 
     @web.exception_handler(Exception)
-    async def _err(request: Request, exc: Exception):
+    async def _handle_error(request: Request, exc: Exception):
         if isinstance(exc, HTTPException):
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         log.exception(f"Unhandled: {exc}")
@@ -198,7 +261,11 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
 
     @web.get("/")
     def health():
-        return {"status": "ok", "active_model": _active["model"], "allowed_models": allowed_models}
+        return {
+            "status": "ok",
+            "active_model": _active["model"],   # None = nothing in VRAM yet
+            "available_models": ALL_MODELS,
+        }
 
     @web.get("/ping")
     def ping():
@@ -208,42 +275,47 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
     async def list_models():
         async with _httpx.AsyncClient(timeout=30) as c:
             data = (await c.get(f"{OLLAMA_URL}/api/tags")).json()
-        all_local = [m["name"] for m in data.get("models", [])]
-        visible = [m for m in all_local if not allowed_models or m in allowed_models]
-        return {"models": visible, "active": _active["model"]}
+        on_disk = [m["name"] for m in data.get("models", [])]
+        return {
+            "models": on_disk,
+            "active_in_vram": _active["model"],
+        }
 
     # ── Model lifecycle ────────────────────────────────────────────────────────
 
     @web.post("/api/load")
     async def load_model(request: Request):
+        """Explicitly pre-warm a model into VRAM before sending inference requests."""
         body  = await request.json()
         model = body.get("model", "").strip()
         if not model:
             raise HTTPException(status_code=400, detail="'model' field required")
         _check_allowed(model)
-        await _ensure(model)
+        await _ensure_in_vram(model)
         return {"status": "loaded", "model": model}
 
     @web.post("/api/unload")
     async def unload_model(request: Request):
+        """Release a model from VRAM. It stays on disk for fast next load."""
         body  = await request.json()
         model = body.get("model", "").strip()
         if not model:
             raise HTTPException(status_code=400, detail="'model' field required")
-        await _unload(model)
+        await _unload_from_vram(model)
         if _active["model"] == model:
             _active["model"] = None
         return {"status": "unloaded", "model": model}
 
     @web.post("/api/switch")
     async def switch_model(request: Request):
+        """Explicitly switch the active VRAM model (previous is unloaded)."""
         body      = await request.json()
         new_model = body.get("model", "").strip()
         if not new_model:
             raise HTTPException(status_code=400, detail="'model' field required")
         _check_allowed(new_model)
         prev = _active["model"]
-        await _ensure(new_model)
+        await _ensure_in_vram(new_model)
         return {"status": "switched", "previous_model": prev, "active_model": new_model}
 
     # ── Inference ──────────────────────────────────────────────────────────────
@@ -253,7 +325,7 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
         body  = await request.json()
         model = _resolve_model(body)
         _check_allowed(model)
-        await _ensure(model)
+        await _ensure_in_vram(model)   # loads on demand if not already warm
         body["model"] = model
         return await _ollama_post("/api/generate", body)
 
@@ -262,7 +334,7 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
         body  = await request.json()
         model = _resolve_model(body)
         _check_allowed(model)
-        await _ensure(model)
+        await _ensure_in_vram(model)
         body["model"] = model
         return await _ollama_post("/api/chat", body)
 
@@ -271,7 +343,7 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
         body  = await request.json()
         model = _resolve_model(body)
         _check_allowed(model)
-        await _ensure(model)
+        await _ensure_in_vram(model)
         body["model"] = model
         return await _ollama_post("/v1/chat/completions", body)
 
@@ -279,142 +351,87 @@ def _build_gateway(allowed_models: list[str]) -> FastAPI:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ── Heavy tier — H200 ─────────────────────────────────────────────────────────
+# ── CoreLLM service — 4× A10G ─────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
-
-HEAVY_MODELS = [
-    "nemotron-3-super:120b",  # 120B — primary model (text, tools, thinking, 256k ctx)
-    "qwen3-vl:32b",           # 32B  — vision, text, tools, thinking, 256k ctx
-]
 
 @app.cls(
     image=image,
-    gpu="H200",
+    gpu=modal.gpu.A10G(count=4),   # 4× 24 GB = 96 GB VRAM — fits any model
     volumes={VOLUME_MOUNT: model_volume},
-    # ── Cost: pay only when active ─────────────────────────────────────────────
-    min_containers=0,
-    scaledown_window=60,           # check idle every 60 s for fine-grained billing
+
+    # ── Cost: pay only while handling requests ─────────────────────────────────
+    min_containers=0,              # no idle containers — $0 when nobody is calling
+    scaledown_window=60,           # check for idle every 60 s (fine-grained billing)
+
     # ── Speed: GPU memory snapshot ─────────────────────────────────────────────
-    # Checkpoint the VRAM state after startup → subsequent cold starts resume in ~5 s
+    # Snapshot captures: Ollama server running + 0 models in VRAM.
+    # Cold start resumes from snapshot (~5 s) then loads the requested model on demand.
     enable_memory_snapshot=True,
-    timeout=900,                   # 15 min max per request (long generations)
+
+    timeout=900,                   # 15 min max per request (for large model loads + long gen)
 )
-class CoreLLMHeavy:
+class CoreLLM:
 
     @modal.enter(snap=True)
     def startup(self):
-        """Runs once on cold start. snap=True → included in GPU memory snapshot."""
-        import httpx as _httpx
+        """
+        Cold-start initialisation — included in GPU memory snapshot.
+        1. Start Ollama server (uses all 4 GPUs via CUDA)
+        2. Verify models are on disk (from persistent volume)
+        3. Nothing loaded into VRAM — models load on first user request
+        """
         self._proc = _start_ollama()
-
-        for m in HEAVY_MODELS:
-            _pull_if_missing(m)
-
-        # Pre-warm primary model into VRAM so the snapshot captures it hot
-        log.info("Pre-warming nemotron-3-super:120b for GPU snapshot...")
-        try:
-            _httpx.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={"model": "nemotron-3-super:120b", "prompt": "", "keep_alive": -1},
-                timeout=300,
-            )
-            log.info("nemotron-3-super:120b hot in VRAM ✓")
-        except Exception as e:
-            log.warning(f"Pre-warm failed (non-fatal): {e}")
-
-        self._gateway = _build_gateway(HEAVY_MODELS)
+        log.info("Checking model disk cache...")
+        _verify_models_on_disk()
+        log.info("Ready — VRAM is empty, models will load on first request")
+        self._gateway = _build_gateway()
 
     @modal.exit()
     def shutdown(self):
+        """Gracefully stop Ollama when the container exits."""
         if hasattr(self, "_proc"):
             self._proc.terminate()
 
-    @modal.asgi_app(label="corellm-heavy")
+    @modal.asgi_app(label="corellm")
     def web(self):
         return self._gateway
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ── Light tier — A10G ─────────────────────────────────────────────────────────
-# ══════════════════════════════════════════════════════════════════════════════
-
-LIGHT_MODELS = [
-    "lfm2.5-thinking:1.2b",  # ultra fast — tools, thinking, 32k ctx
-    "qwen3-embedding:8b",    # embedding
-]
-
-@app.cls(
-    image=image,
-    gpu="A10G",   # 24 GB VRAM — ~3× faster than T4 for small models, still cost-effective
-    volumes={VOLUME_MOUNT: model_volume},
-    min_containers=0,
-    scaledown_window=60,
-    enable_memory_snapshot=True,
-    timeout=300,
-)
-class CoreLLMLight:
-
-    @modal.enter(snap=True)
-    def startup(self):
-        import httpx as _httpx
-        self._proc = _start_ollama()
-
-        for m in LIGHT_MODELS:
-            _pull_if_missing(m)
-
-        # Pre-warm the fast model into VRAM
-        log.info("Pre-warming lfm2.5-thinking:1.2b for GPU snapshot...")
-        try:
-            _httpx.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={"model": "lfm2.5-thinking:1.2b", "prompt": "", "keep_alive": -1},
-                timeout=120,
-            )
-            log.info("lfm2.5-thinking:1.2b hot in VRAM ✓")
-        except Exception as e:
-            log.warning(f"Pre-warm failed (non-fatal): {e}")
-
-        self._gateway = _build_gateway(LIGHT_MODELS)
-
-    @modal.exit()
-    def shutdown(self):
-        if hasattr(self, "_proc"):
-            self._proc.terminate()
-
-    @modal.asgi_app(label="corellm-light")
-    def web(self):
-        return self._gateway
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ── One-time model seeder — run manually to fill the volume ───────────────────
+# ── One-time model seeder ─────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.function(
     image=image,
-    gpu="A10G",           # A10G sufficient for downloading; saves H200 quota
+    gpu=modal.gpu.A10G(count=1),   # Only 1 GPU needed for downloading
     volumes={VOLUME_MOUNT: model_volume},
-    timeout=3600,
+    timeout=7200,                  # 2 hr max — large models take time to download
 )
 def pull_all_models():
     """
-    Seeds all models into the persistent volume (run ONCE on first deploy).
+    Seeds ALL models into the persistent volume.
+    Run ONCE before deploying (or after adding new models).
 
         modal run modal_app.py::pull_all_models
 
-    After this, cold starts just read from disk — no re-downloading ever.
+    After this, containers NEVER re-download — they read from disk.
     """
     proc = _start_ollama()
     env  = {**os.environ, "OLLAMA_MODELS": VOLUME_MOUNT}
 
-    all_models = HEAVY_MODELS + LIGHT_MODELS
-    log.info(f"Seeding {len(all_models)} models into volume...")
-    for m in all_models:
-        log.info(f"  → pulling '{m}'...")
-        subprocess.run(["ollama", "pull", m], check=True, env=env)
-        log.info(f"  ✓ '{m}' cached")
+    log.info(f"Seeding {len(ALL_MODELS)} models into persistent volume...")
+    for model in ALL_MODELS:
+        # Check if already cached to avoid re-downloading
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, env=env)
+        tag = model.split(":")[0]
+        if tag in result.stdout or model in result.stdout:
+            log.info(f"  ✓ '{model}' already cached — skipping")
+            continue
+        log.info(f"  → downloading '{model}'...")
+        subprocess.run(["ollama", "pull", model], check=True, env=env)
+        log.info(f"  ✓ '{model}' cached")
 
-    model_volume.commit()   # flush writes to persistent storage
+    model_volume.commit()  # flush writes to persistent storage
     proc.terminate()
-    log.info("All models seeded. Volume is ready.")
-    return {"status": "done", "models": all_models}
+    log.info("All models seeded. Volume is ready for deployment.")
+    return {"status": "done", "models": ALL_MODELS}

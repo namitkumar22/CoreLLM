@@ -6,13 +6,15 @@ Drop-in replacement for ChatOpenAI / ChatGroq — no API key required.
 
 Models
 ------
-  Heavy tier (H200 — set base_url to the heavy endpoint):
-    "nemotron-3-super:120b"  – text, tools, thinking,            context=256k  (primary)
-    "qwen3-vl:32b"           – text, vision, tools, thinking,   context=256k
+  All served from a single endpoint (4× A10G):
+    "qwen3.6:35b"           – coding, text, tools, thinking, context=256k  (primary)
+    "qwen3-vl:32b"          – vision, text, tools, thinking, context=256k
+    "nemotron3:33b"         – audio, text, tools, vision, thinking
+    "lfm2.5-thinking:1.2b" – ultra fast, tools, thinking, context=32k
+    "qwen3-embedding:8b"   – embedding
 
-  Light tier (A10G — set base_url to the light endpoint):
-    "lfm2.5-thinking:1.2b"  – ultra fast, tools, thinking, context=32k
-    "qwen3-embedding:8b"    – embedding
+  Models are loaded into VRAM on first request and unloaded on switch.
+  Only one model lives in VRAM at a time to maximise resource efficiency.
 
 Install
 -------
@@ -23,8 +25,8 @@ Usage
     from corellm_sdk import CoreLLMChat
 
     llm = CoreLLMChat(
-        model="nemotron-3-super:120b",
-        base_url="https://<your-workspace>--corellm-heavy-web.modal.run",
+        model="qwen3.6:35b",
+        base_url="https://<your-workspace>--corellm-web.modal.run",
     )
 
     # LangChain
@@ -60,13 +62,11 @@ from langchain_openai import ChatOpenAI
 from pydantic import Field
 
 
-# Default endpoints — override with base_url or CORELLM_BASE_URL env var
-_DEFAULT_HEAVY_URL = "https://namitkumar22--corellm-heavy-web.modal.run"
-_DEFAULT_LIGHT_URL = "https://namitkumar22--corellm-light-web.modal.run"
+# Single endpoint for all models
+_DEFAULT_URL = "https://namitkumar2208--corellm-web.modal.run"
 
-# Convenience alias users can import to avoid typos
-HEAVY_ENDPOINT = _DEFAULT_HEAVY_URL
-LIGHT_ENDPOINT = _DEFAULT_LIGHT_URL
+# Convenience alias
+ENDPOINT = _DEFAULT_URL
 
 
 class CoreLLMChat(ChatOpenAI):
@@ -96,7 +96,7 @@ class CoreLLMChat(ChatOpenAI):
     def __init__(self, **kwargs: Any):
         # ── Resolve base URL ──────────────────────────────────────────────────
         env_url  = os.environ.get("CORELLM_BASE_URL", "")
-        base_url = kwargs.pop("base_url", env_url or _DEFAULT_HEAVY_URL).rstrip("/")
+        base_url = kwargs.pop("base_url", env_url or _DEFAULT_URL).rstrip("/")
         timeout  = kwargs.pop("timeout",  300)
         preload  = kwargs.pop("preload",  True)
 
