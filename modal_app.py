@@ -40,7 +40,7 @@ OLLAMA_URL   = "http://127.0.0.1:11434"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("curl", "ca-certificates")
+    .apt_install("curl", "ca-certificates", "zstd")
     .run_commands("curl -fsSL https://ollama.com/install.sh | sh")
     .pip_install("fastapi", "uvicorn[standard]", "httpx")
 )
