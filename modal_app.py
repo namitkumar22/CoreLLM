@@ -311,7 +311,7 @@ def _build_gateway() -> FastAPI:
 
 @app.cls(
     image=image,
-    gpu=modal.gpu.A10G(count=4),   # 4× 24 GB = 96 GB VRAM total
+    gpu="a10g:4",                   # 4× 24 GB = 96 GB VRAM total
     volumes={VOLUME_MOUNT: model_volume},
 
     # ── Cost controls ──────────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ class CoreLLM:
 
 @app.function(
     image=image,
-    gpu=modal.gpu.A10G(count=1),   # 1 GPU sufficient for downloading
+    gpu="a10g:1",                   # 1 GPU sufficient for downloading
     volumes={VOLUME_MOUNT: model_volume},
     timeout=7200,                  # 2 hr max (large models take time)
 )
